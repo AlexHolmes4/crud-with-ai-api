@@ -8,10 +8,10 @@ namespace CrudApi.Application.Extensions;
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
-    {       
+    {
         services.AddScoped<IProductService, ProductService>();
-        services.AddScoped<IAnthropicToolService, AnthropicToolService>();
-        services.AddScoped<IConversationService, ConversationService>();
+        services.AddSingleton<IAnthropicToolService, AnthropicToolService>();
+        services.AddSingleton<IConversationService, ConversationService>();
 
         // Configure Mapster
         var config = TypeAdapterConfig.GlobalSettings;

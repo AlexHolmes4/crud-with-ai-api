@@ -1,6 +1,8 @@
 # AI-Powered Product CRUD API
 
-A conversational AI-powered REST API for product management using Claude (Anthropic) with tool-based function calling. Users interact with the system through natural language, and Claude translates requests into structured CRUD operations. Front end application (https://github.com/alexholmes4/crud-with-ai-ui)
+A conversational AI-powered REST API for product management using Claude (Anthropic) with tool-based function calling. 
+Users interact with the system through natural language, and Claude translates requests into structured CRUD operations. 
+Front end application (https://github.com/alexholmes4/crud-with-ai-ui)
 
 ## Overview
 
