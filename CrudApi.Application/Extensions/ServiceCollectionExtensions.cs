@@ -1,8 +1,6 @@
-using Anthropic.SDK;
 using CrudApi.Application.Mappings;
 using CrudApi.Application.Services;
 using Mapster;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrudApi.Application.Extensions;
