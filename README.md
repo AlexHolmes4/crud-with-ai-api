@@ -32,13 +32,13 @@ This API demonstrates an **agentic AI pattern** where:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      User Request                           │
+│                   User Request                              │
 │         "Create a wireless mouse for $29.99"                │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  API Layer (ASP.NET Core)                   │
+│              API Layer (ASP.NET Core)                       │
 │              ConversationsController                        │
 └────────────────────────┬────────────────────────────────────┘
                          │
