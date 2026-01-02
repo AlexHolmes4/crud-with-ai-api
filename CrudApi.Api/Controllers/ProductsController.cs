@@ -22,6 +22,16 @@ public class ProductsController : ControllerBase
         return Ok(products);
     }
 
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ProductResponse>> GetProductById(int id, CancellationToken cancellationToken)
+    {
+        var product = await _productService.GetProductByIdAsync(id, cancellationToken);
+        if (product == null)
+            return NotFound(new { message = $"Product with ID '{id}' not found" });
+
+        return Ok(product);
+    }
+
     [HttpGet("name/{name}")]
     public async Task<ActionResult<ProductResponse>> GetProductByName(string name, CancellationToken cancellationToken)
     {
