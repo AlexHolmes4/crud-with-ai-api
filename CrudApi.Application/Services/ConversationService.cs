@@ -48,12 +48,6 @@ public class ConversationService : IConversationService
         // Add user prompt to conversation
         messages.Add(new Message(RoleType.User, request.Prompt));
 
-        var response = new ChatPromptResponse
-        {
-            ConversationId = conversationId,
-            Messages = new()
-        };
-
         // Get tools for Claude
         var tools = _toolService.GetProductTools();
 
@@ -62,9 +56,10 @@ public class ConversationService : IConversationService
         {
             Messages = messages,
             MaxTokens = 2048,
-            Model = AnthropicModels.Claude45Haiku,
+            Model = AnthropicModels.Claude35Haiku,
+            Stream = false,
+            Temperature = 0.7m,
             Tools = tools,
-            ToolChoice = new ToolChoice { Type = ToolChoiceType.Auto },
             System = new List<SystemMessage>
             {
                 new SystemMessage(GetSystemPrompt())
@@ -72,10 +67,14 @@ public class ConversationService : IConversationService
         };
 
         // Call Claude
-        var claudeResponse = await _anthropicClient.Messages.GetClaudeMessageAsync(parameters, cancellationToken);
+        var claudeResponse = await _anthropicClient.Messages.GetClaudeMessageAsync(parameters);
 
         // Add assistant response to conversation
         messages.Add(claudeResponse.Message);
+
+        // Track last action and affected product for metadata
+        string? lastAction = null;
+        ProductResponse? lastAffectedProduct = null;
 
         // Process tool calls if any
         if (claudeResponse.ToolCalls.Any())
@@ -88,60 +87,123 @@ public class ConversationService : IConversationService
                     productService,
                     cancellationToken);
 
-                // Add tool result to conversation
-                messages.Add(new Message
-                {
-                    Role = RoleType.User,
-                    Content = new List<ContentBase>
-                    {
-                        new ToolResultContent
-                        {
-                            ToolUseId = toolCall.Id,
-                            Content = new List<ContentBase>
-                            {
-                                new TextContent { Text = toolResult }
-                            }
-                        }
-                    }
-                });
+                // Track the last action and affected product
+                lastAction = toolCall.Name;
+                lastAffectedProduct = affectedProduct;
 
-                response.ProcessedAction = toolCall.Name;
-
-                // Set the affected product if available
-                if (affectedProduct != null)
-                {
-                    response.AffectedProduct = affectedProduct;
-                }
+                // Add tool result to conversation using the proper SDK constructor
+                messages.Add(new Message(toolCall, toolResult));
             }
 
             // Get follow-up response from Claude after tool execution
-            var followUpResponse = await _anthropicClient.Messages.GetClaudeMessageAsync(parameters, cancellationToken);
+            var followUpResponse = await _anthropicClient.Messages.GetClaudeMessageAsync(parameters);
             messages.Add(followUpResponse.Message);
         }
 
-        // Convert messages to DTOs
-        response.Messages = messages
+        // Convert messages to DTOs, filtering out empty messages
+        var filteredMessages = messages
             .Where(m => m.Role == RoleType.User || m.Role == RoleType.Assistant)
-            .Select(m => new ChatMessageDto
+            .Where(m => !string.IsNullOrWhiteSpace(ExtractMessageContent(m)))
+            .ToList();
+
+        var chatMessages = filteredMessages
+            .Select((m, index) => new ChatMessageResponse
             {
                 Role = m.Role.ToString().ToLower(),
-                Content = m.ToString()
+                Content = ExtractMessageContent(m),
+                // Only apply metadata to the last assistant message (the final response)
+                ProcessedAction = (m.Role == RoleType.Assistant && index == filteredMessages.Count - 1) ? lastAction : null,
+                AffectedProduct = (m.Role == RoleType.Assistant && index == filteredMessages.Count - 1) ? lastAffectedProduct : null
             })
             .ToList();
+
+        var response = new ChatPromptResponse
+        {
+            ConversationId = conversationId,
+            Messages = chatMessages
+        };
 
         return response;
     }
 
+    private static string ExtractMessageContent(Message message)
+    {
+        if (message?.Content == null || message.Content.Count == 0)
+            return string.Empty;
+
+        var textContents = new List<string>();
+
+        foreach (var content in message.Content)
+        {
+            if (content is TextContent textContent)
+            {
+                textContents.Add(textContent.Text);
+            }
+        }
+
+        return string.Join("\n", textContents);
+    }
+
     private static string GetSystemPrompt()
     {
-        return @"You are a helpful AI assistant for a product management system. Your role is to help users manage products through natural language conversation.
+        return @"You are a AI assistant for a product management system. 
 
 ## Available Operations
-- Find products by NAME or SKU (not by ID)
-- List all products or search by name/description
-- Create new products (required: Name, Description, Price, SKU - all required, SKU must be unique)
-- Update existing products (by Name or SKU - all fields required)
-- Delete products (by Name or SKU)
+1. find_product - Find a product by Name or SKU
+2. list_products - List all products or search by term
+3. create_product - Create a new product
+4. update_product - Update an existing product by Name or SKU
+5. delete_product - Delete a product by Name or SKU
+
+⚠️ CRITICAL INSTRUCTION ⚠️
+When you call a function/tool, you will receive a JSON response. You MUST read and parse this JSON response to extract values. NEVER make up, generate, or guess values. ALWAYS use the exact values from the tool response you received.
+
+CRITICAL find_product workflow:
+1. When a user requests to find a product, use the find_product tool with either Name or SKU.
+2. If multiple products match the Name, inform the user and ask for the SKU to identify the specific product.
+3. Present the found product using the Product Display Format detailed below in this message.
+4. if no product is found, inform the user and offer to list all products or create a new one.
+
+CRITICAL list_products workflow:
+1. When a user requests to list products, use the list_products tool.
+2. List all products using the Product Display Format detailed below in this message.
+3. if no products exist, inform the user and offer to create a new one.
+
+CRITICAL create_product workflow:
+1. When a user requests to create a product you must collect the following required fields:
+    - Name
+    - Description
+    - Price
+    - SKU
+2. If any required field is missing, ask the user specifically for that information.
+3. Before calling the create_product tool, display the information using the Product Display Format and ask them to confirm the details are correct. Show: **Product: [Name]** - Description: [Description] - Price: $[Price] - SKU: [SKU]. Then ask ""Does this look correct?""
+4. WAIT for the user to explicitly confirm (e.g., ""yes"", ""confirm"", ""proceed"", ""create it"") BEFORE calling the tool.
+5. ONLY AFTER explicit user confirmation should you call the create_product tool.
+6. NEVER call create_product without explicit user confirmation.
+7. When creating if the product_create fails because the SKU already exists, inform the user and ask for a different SKU to try again. Follow the same confirmation process before retrying.
+
+CRITICAL update_product workflow:
+1. When a user requests to update a product, you must identify the product by either Name or SKU.
+2. If multiple products match the Name, inform the user and ask for the SKU to identify the specific product.
+3. Collect the fields the user wants to update:
+    - Name
+    - Description
+    - Price
+    - SKU
+4. If any required field is missing, ask the user specifically for that information.
+5. Before calling the update_product tool, display the updated information using the Product Display Format and ask them to confirm the details are correct. Show: **Product: [Name]** - Description: [Description] - Price: $[Price] - SKU: [SKU]. Then ask ""Does this look correct?""
+6. WAIT for the user to explicitly confirm (e.g., ""yes"", ""confirm"", ""proceed"", ""update it"") BEFORE calling the tool.
+7. ONLY AFTER explicit user confirmation should you call the update_product tool.
+8. NEVER call update_product without explicit user confirmation.
+9. When updating if the product_update fails because the SKU already exists, inform the user and ask for a different SKU to try again. Follow the same confirmation process before retrying.
+
+CRITICAL delete_product workflow:
+1. When a user requests to delete a product, you must identify the product by either Name or SKU.
+2. If multiple products match the Name, inform the user and ask for the SKU to identify the specific product.
+3. Before calling the delete_product tool, display the product details using the Product Display Format and ask them to confirm they want to delete it. Show: **Product: [Name]** - Description: [Description] - Price: $[Price] - SKU: [SKU]. Then ask ""Are you absolutely sure you want to delete this product? This action cannot be undone.""
+4. WAIT for the user to explicitly confirm (e.g., ""yes"", ""confirm"", ""delete it"", ""proceed"") BEFORE calling the tool.
+5. ONLY AFTER explicit user confirmation should you call the delete_product tool.
+6. NEVER call delete_product without explicit user confirmation.
 
 ## Product Display Format
 ALWAYS display products using this exact format (DO NOT show CreatedAt or UpdatedAt):
@@ -157,23 +219,13 @@ Example:
 - Price: $29.99
 - SKU: WM-001
 
-## Creating Products
-When users want to create a product, inform them of the required fields:
-""To create a product, I need:
-- Name (required)
-- Description (required)
-- Price (required)
-- SKU (required - must be unique)""
-
-If any required field is missing, ask for it specifically. SKU must be unique across all products.
-
 ## Guidelines
 1. ALWAYS use the exact display format shown above when presenting products
 2. Users can ONLY find/update/delete products by Name or SKU, never by ID
-3. When users ask to ""add"", ""create"", or ""make"" a product, use the create_product tool
-4. When users ask to ""show"", ""find"", ""get"", or ""display"" a product, use find_product (by name/SKU) or list_products
-5. When users ask to ""change"", ""update"", or ""modify"" a product, use update_product (by name/SKU)
-6. When users ask to ""remove"", ""delete"", or ""get rid of"" a product, use delete_product (by name/SKU)
+3. When users ask to ""add"", ""create"", or ""make"" a product, follow the create_product workflow
+4. When users ask to ""show"", ""find"", ""get"", or ""display"" follow the find_product workflow
+5. When users ask to ""change"", ""update"", or ""modify"" follow the update_product workflow
+6. When users ask to ""remove"", ""delete"", or ""get rid of"" follow the delete_product workflow
 7. If a user's request is ambiguous or missing required fields, ask clarifying questions
 8. Always confirm destructive actions (updates and deletes) by showing the product details first
 9. Always confirm the provided information before creating or updating a product
@@ -181,12 +233,7 @@ If any required field is missing, ask for it specifically. SKU must be unique ac
 
 ## Important Rules
 - NEVER expose or reference product IDs to users
-- ALWAYS validate that Name, Description, and Price are provided for new products
-- Be conversational but consistent in formatting
-- If a product name or SKU doesn't exist, offer to list available products or create a new one
-- ALWAYS confirm with the user before performing create, update, or delete actions, showing the product details
-
-Remember: Consistency in presentation helps users quickly understand product information.";
+- Be conversational but consistent in formatting";
     }
 
     private async Task<(string result, ProductResponse? affectedProduct)> ExecuteToolAsync(
