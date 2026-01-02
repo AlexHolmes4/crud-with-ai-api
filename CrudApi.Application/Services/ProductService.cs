@@ -7,6 +7,7 @@ namespace CrudApi.Application.Services;
 
 public interface IProductService
 {
+    Task<ProductResponse?> GetProductByIdAsync(int id, CancellationToken cancellationToken);
     Task<ProductResponse?> GetProductByNameAsync(string name, CancellationToken cancellationToken = default);
     Task<ProductResponse?> GetProductBySkuAsync(string sku, CancellationToken cancellationToken = default);
     Task<List<ProductResponse>> GetAllProductsAsync(CancellationToken cancellationToken = default);
@@ -25,6 +26,12 @@ public class ProductService : IProductService
     public ProductService(IProductRepository repository)
     {
         _repository = repository;
+    }
+
+    public async Task<ProductResponse?> GetProductByIdAsync(int id, CancellationToken cancellationToken)
+    {
+        var product = await _repository.GetByIdAsync(id, cancellationToken);
+        return product?.Adapt<ProductResponse>();
     }
 
     public async Task<ProductResponse?> GetProductByNameAsync(string name, CancellationToken cancellationToken = default)
