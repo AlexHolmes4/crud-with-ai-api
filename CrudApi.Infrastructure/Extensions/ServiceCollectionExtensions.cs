@@ -13,7 +13,8 @@ public static class ServiceCollectionExtensions
     {
         // Register DbContext with in-memory database
         services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseInMemoryDatabase("CrudApiDb"));
+            options.UseInMemoryDatabase("CrudApiDb")
+            .UseAsyncSeeding((context, _, CancellationToken) => DatabaseSeeder.SeedAsync(context, CancellationToken)));
 
         // Register repositories
         services.AddScoped<IProductRepository, ProductRepository>();
