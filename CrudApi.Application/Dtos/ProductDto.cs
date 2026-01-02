@@ -2,6 +2,7 @@ namespace CrudApi.Application.Dtos;
 
 public class ProductResponse
 {
+    public required int Id { get; set; }
     public required string Name { get; set; }
     public required string Description { get; set; }
     public required decimal Price { get; set; }
