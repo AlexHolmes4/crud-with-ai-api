@@ -1,7 +1,9 @@
 ﻿using Anthropic.SDK;
 using CrudApi.API.ExceptionHandler;
 using CrudApi.Application.Extensions;
+using CrudApi.Infrastructure.Data;
 using CrudApi.Infrastructure.Extensions;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,5 +45,14 @@ app.UseHttpsRedirection();
 app.UseCors("AllowBlazorClient");
 app.UseAuthorization();
 app.MapControllers();
+
+if (app.Environment.IsDevelopment()) // Optional: only run in dev environment
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await context.Database.EnsureCreatedAsync();
+    }
+}
 
 await app.RunAsync();
